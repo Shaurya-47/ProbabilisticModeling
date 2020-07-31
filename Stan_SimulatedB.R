@@ -1,91 +1,93 @@
+library(rstan)
+rstan_options (auto_write = TRUE)
+options (mc.cores = parallel::detectCores ())
+library(xts)
+library(coda)
+library(rjags)
 library(outbreaks)
+library("lubridate")
+library(ggplot2)
+
 data1 <- ebola_kikwit_1995
+data1$Day <- yday(data1$date)
+
+#Daily case count plot
+ggplot(data1, aes(x=Day, y=onset)) + 
+  geom_bar(stat = "identity", width=0.5) +
+  theme_classic()+ scale_x_continuous(name="Time of symptom onset (days)",expand = c(0, 0), limits = c(0,NA), breaks = seq(0,200,20)) + 
+  scale_y_continuous(name= "Cases",expand = c(0, 0), limits = c(0, NA), breaks = seq(0,20,5))
+#Daily death count plot
+ggplot(data1, aes(x=Day, y=death)) + 
+  geom_bar(stat = "identity", width=0.5) +
+  theme_classic()+ scale_x_continuous(name="Time of death (days)",expand = c(0, 0), limits = c(0,NA), breaks = seq(0,200,20)) + 
+  scale_y_continuous(name= "Cases",expand = c(0, 0), limits = c(0,15),breaks = seq(0,15,5))
+
 C<- data1$onset
 D<- data1$death
 n_days <- length(C)
 ncases <- sum(C)
-s0=5364500-1
-e0=1 
-a=0
-beta=0.2
-q=0.2
-rho=0.2
-gamma=0.143 
-h=1
-r0=0
-tcontrol=130
-N = 5364500
-t <- seq(0, n_days, by = 1)
-t0 = 0 
-t <- t[-1]
+s0=5364500-1  #initial conditions
+e0=1          #initial conditions
+a=0           #initial conditions
+beta=0.2      #initial conditions
+q=0.2         #initial conditions
+rho=0.2       #initial conditions
+gamma=0.143   #initial conditions
+h=1           #initial conditions
+r0=0          #initial conditions
+tcontrol=130  # time point when control interventions was introduced
+N = 5364500   # population size
+
 ST= N-ncases
 m= ST-s0
-abs(m) #  final size of the epidemic
-S <- vector(mode="numeric", length = 192)
+abs(m) 
+S <- vector(mode="numeric", length = 192) #Susceptible compartment
 S[1]=s0 #  initial conditions for S
-E <- vector(mode="numeric", length = 192)
+E <- vector(mode="numeric", length = 192) #Exposed compartment
 E[1]= e0 #  initial conditions for E
-I <- vector(mode="numeric", length = 192)
+I <- vector(mode="numeric", length = 192) #Infectious compartment
 I[1]= a #  initial conditions for I
-R <- vector(mode="numeric", length = 192)
+R <- vector(mode="numeric", length = 192) #Recovered(Dead or recovered) compartment
 R[1]= r0 #  initial conditions for R
-B0 <- vector(mode="numeric", length = 192)
+B0 <- vector(mode="numeric", length = 192) #Number of susceptible who become infectious
 #y0 = c(S = s0,E=e0, I = a, R = r0)
-B0[1] <- abs(m)
+B0[1] <-abs(m)
 Beta <- vector(mode="numeric", length = 192)
 B <- vector(mode="numeric", length = 192)
 P <-vector(mode="numeric", length = 192)
 pc<-vector(mode="numeric", length = 192)
 pr <-vector(mode="numeric", length = 192)
-M<-matrix(nrow=192, ncol=1000)
+
 B[1] = B0[1]
 S[1]= S[1] - B0[1]
 E[1]= E[1] + B0[1] - C[1]
 I[1]= I[1] + C[1] - D[1]
 R[1]= N - S[1] - E[1] - I[1]
-for (j in 1:1000){
-  if (j==1){
-    for(t in 2:n_days){
-      if(t >= 130){
-        Beta[t]= beta*exp(-q*(t-130))
-      }
-      else{
-        Beta[t]= beta
-      }
-      S[t]= S[t-1] - B[t-1]
-      E[t]= E[t-1] + B[t-1] - C[t-1]
-      I[t]= I[t-1] + C[t-1] - D[t-1]
-      R[t] = N - S[t] - E[t] - I[t]
-      P[t]= 1 - exp(-(Beta[t]*I[t]/N))
-      pc = 1 - exp(-rho)
-      pr = 1- exp(-gamma)
-      B[t] = rbinom(n=1,size=S[t], prob=P[t])
-    }
-    M=matrix(B)
+# Simulating B using initial condition and empirical data of C and D 
+for(t in 2:n_days){
+  if(t >= 130){
+    Beta[t]= beta*exp(-q*(t-130))
   }
   else{
-    for(t in 2:n_days){
-      if(t >= 130){
-        Beta[t]= beta*exp(-q*(t-130))
-      }
-      else{
-        Beta[t]= beta
-      }
-      S[t]= S[t-1] - B[t-1]
-      E[t]= E[t-1] + B[t-1] - C[t-1]
-      I[t]= I[t-1] + C[t-1] - D[t-1]
-      R[t] = N - S[t] - E[t] - I[t]
-      P[t]= 1 - exp(-(Beta[t]*I[t]/N))
-      pc = 1 - exp(-rho)
-      pr = 1- exp(-gamma)
-      B[t] = rbinom(n=1,size=S[t], prob=P[t])
-    }
-    M=round(rowMeans(cbind(M,B)))
+    Beta[t]= beta
   }
+  
+  S[t]= S[t-1] - B[t-1]
+  E[t]= E[t-1] + B[t-1] - C[t-1]
+  I[t]= I[t-1] + C[t-1] - D[t-1]
+  R[t] = N - S[t] - E[t] - I[t]
+  
+  P[t]= 1 - exp(-(Beta[t]*I[t]/N))
+  pc = 1 - exp(-rho)
+  pr = 1- exp(-gamma)
+  
+  B[t] = B[t] = rbinom(n=1,size=S[t], prob=P[t])
 }
+
+#input for the Stan code
 DataSEIR <- list(n_days = n_days, S0 = S , E0 = E, I0 = I, R0 = R,
                  N = N, tcon = tcontrol, C = C,
-                 D = D, B = M)
+                 D = D, B = B)
 write("
 data {
   int<lower=1> n_days;// total # of time point 
@@ -100,7 +102,7 @@ data {
   int B[n_days]; // initial conditions for unobserved entity. 
 }
 parameters {
-  real<lower=0,upper=1> beta;
+  real<lower=0,upper=1> beta; //parameter constraints mentioned in the paper are used as bounds
   real<lower=1/10.7,upper=1/3.5> gamma;
   real<lower=1/21.0,upper=1> rho;
   real<lower=0> q;
@@ -143,7 +145,7 @@ model{
       P[t]= 1 - exp(-(Beta[t]*I[t]/N));
       pc = 1 - exp(-rho);
       pr = 1- exp(-gamma);
-      B[t] ~ binomial(S[t], P[t]); //  
+      B[t] ~ binomial(S[t], P[t]); // # of cases infected but not yet infectious.
       C[t] ~ binomial(E[t], pc); // # of cases by date of symptom onset
       D[t] ~ binomial(I[t], pr); // # of cases removed from infectious class
   }
@@ -159,13 +161,13 @@ generated quantities {
 stanc("stan_model1.stan")
 stan_model1 <- "stan_model1.stan"
 parameter= c("beta", "gamma", "rho", "q", "Reproduction", "EffReproduction")
-ini= function(){list(beta = 0.2, gamma = 0.143, rho=0.2, q = 0.2)}
+
 fit_seir <- stan(file=stan_model1,
                  data = DataSEIR,
                  pars = parameter,
                  #init = ini,
                  iter = 20000,
-                 chains = 4,
+                 chains = 2,
                  warmup = 10000)
 summary(fit_seir, pars=c("beta", "gamma", "rho", "q", "Reproduction"))
 stan_dens(fit_seir, pars=c("beta", "gamma", "rho", "q", "Reproduction"))
